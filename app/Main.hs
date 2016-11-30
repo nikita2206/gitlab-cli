@@ -2,66 +2,58 @@
 
 module Main where
 
-import System.Console.ArgParser
-import Network.Wreq
-import Control.Lens
-import Text.Printf
-import Data.Aeson
-import Data.Text as T
-import GHC.Generics
-import Data.Map as M
-import Control.Exception
-import Data.ByteString.Lazy as B
+import Lib
+import System.Console.CmdArgs
 import System.Directory (getHomeDirectory)
+import Control.Exception
+import Control.Arrow (left)
+import Data.Map as M
+import Data.ByteString.Lazy as B
+import Data.Aeson
 
-data GlArgs =
-  GlCreateMr String String String String
-  deriving (Eq, Show)
+data CommonConfig = CommonConfig String GlArgs deriving (Data, Typeable, Show, Eq)
 
-glArgParser :: IO (CmdLnInterface GlArgs)
-glArgParser = mkSubParser
-  [
-    ("mr", mkDefaultApp (GlCreateMr `parsedBy`
-      reqPos "target-branch" `andBy`
-      reqPos "title" `andBy`
-      optFlag "" "source-branch" `andBy`
-      optFlag "_" "project") "mr")
-  ]
+new = GlCreateMr {
+    targetBranch = def &= typ "BRANCH" &= argPos 0,
+    title = def &= typ "TITLE" &= opt Nothing,
+    sourceBranch = def &= typ "BRANCH" &= opt Nothing
+  } &= help "Create a new Merge Request"
 
 main = do
-  interface <- glArgParser
-  runApp interface app
-
-app :: GlArgs -> IO ()
-app (GlCreateMr targetBranch title sourceBranch project) = do
+  cmdArgsMode $ modes [new] &= help "Manipulate or view Merge Requests in gitlab" &= program "gl"
+  -- interface <- glArgParser
   configAll <- loadConfig
+  let args = CommonConfig "sf" (GlCreateMr "dev" "test-mr" "PHP-1234")
+
+  runWithArgs configAll args
+  -- runApp interface (app config)
+
+runWithArgs :: (M.Map String GlConfig) -> CommonConfig -> IO ()
+runWithArgs configAll (CommonConfig project args) = do
   case M.lookup project configAll of
-    Nothing -> throwIO ConfigNotFoundException
-    (Just config) -> do
-      let params = defaults & (param "private_token" .~ [T.pack $ privateToken config])
-      r <- postWith params (url config) [
-          "source_branch" := sourceBranch
-        , "target_branch" := targetBranch
-        , "title" := title
-        ]
-      print (r ^? responseStatus . statusCode)
+    Just config -> app config args
+    Nothing -> print $ "Couldn't find configuration for project " ++ project ++ "\n"
 
-data GlConfig = GlConfig {
-    privateToken :: String
-  , url :: String
-} deriving (Generic, Show)
-
-instance ToJSON GlConfig where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON GlConfig
-
-data ConfigNotFoundException = ConfigNotFoundException deriving (Show)
-instance Exception ConfigNotFoundException
+data ConfigReadingException =
+  ConfigNotFoundException String |
+  ConfigDecodingException String
+instance Exception ConfigReadingException
+instance Show ConfigReadingException where
+  show (ConfigNotFoundException filename) =
+    "Couldn't read configuration from " ++ filename ++ "\nFile doesn't exist.\n"
+  show (ConfigDecodingException msg) =
+    "Couldn't decode configuration: " ++ msg ++ "\n"
 
 loadConfig :: IO (M.Map String GlConfig)
 loadConfig = do
+  result <- loadConfigEither
+  case result of
+    (Left e) -> throwIO e
+    (Right v) -> return v
+
+loadConfigEither :: IO (Either ConfigReadingException (M.Map String GlConfig))
+loadConfigEither = do
   homeDir <- getHomeDirectory
-  jsonConfig <- B.readFile $ homeDir ++ "/.gl-config"
-  case decode jsonConfig :: Maybe (M.Map String GlConfig) of
-    (Just config) -> return config
-    Nothing -> throwIO ConfigNotFoundException
+  let filename = homeDir ++ "/.gl-config"
+  jsonConfig <- B.readFile $ filename
+  return $ left (\msg -> ConfigDecodingException msg) (eitherDecode jsonConfig)
