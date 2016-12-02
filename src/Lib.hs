@@ -2,12 +2,14 @@
 
 module Lib
     ( app
-    , GlArgs(GlCreateMr)
-    , GlConfig(GlConfig)
+    , GlArgs ( GlCreateMr, targetBranch, title, sourceBranch )
+    , GlConfig(..)
     ) where
 
 import Network.Wreq
 import Control.Lens
+import Data.Typeable
+import Data.Data
 import Text.Printf
 import Data.Aeson
 import Data.Text as T

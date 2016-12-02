@@ -1,9 +1,10 @@
-{-# LANGUAGE OverloadedStrings, DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings, DeriveGeneric, DeriveDataTypeable #-}
 
 module Main where
 
 import Lib
 import System.Console.CmdArgs
+import System.Console.CmdArgs.Explicit (processArgs)
 import System.Directory (getHomeDirectory)
 import Control.Exception
 import Control.Arrow (left)
@@ -13,20 +14,20 @@ import Data.Aeson
 
 data CommonConfig = CommonConfig String GlArgs deriving (Data, Typeable, Show, Eq)
 
-new = GlCreateMr {
-    targetBranch = def &= typ "BRANCH" &= argPos 0,
-    title = def &= typ "TITLE" &= opt Nothing,
-    sourceBranch = def &= typ "BRANCH" &= opt Nothing
-  } &= help "Create a new Merge Request"
+mode = cmdArgsMode $ modes [
+    GlCreateMr {
+        targetBranch = def &= typ "TARGET_BRANCH" &= argPos 1
+      , title = def &= typ "TITLE"
+      , sourceBranch = def &= typ "BRANCH" &= name "source-branch"
+    } &= help "Create a new Merge Request" &= explicit &= name "new"
+  ] &= help "Manipulate or view Merge Requests in gitlab" &= program "gl"
 
 main = do
-  cmdArgsMode $ modes [new] &= help "Manipulate or view Merge Requests in gitlab" &= program "gl"
-  -- interface <- glArgParser
+  args <- cmdArgsRun mode
   configAll <- loadConfig
-  let args = CommonConfig "sf" (GlCreateMr "dev" "test-mr" "PHP-1234")
+  let args = CommonConfig "sf" (GlCreateMr "dev" (Just "test-mr") (Just "PHP-1234"))
 
   runWithArgs configAll args
-  -- runApp interface (app config)
 
 runWithArgs :: (M.Map String GlConfig) -> CommonConfig -> IO ()
 runWithArgs configAll (CommonConfig project args) = do
